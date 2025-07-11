@@ -33,11 +33,3 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Initialize database
 db.init_app(app)
-
-# Import models AFTER db initialization but BEFORE app context
-import models
-
-# Create tables in app context
-with app.app_context():
-    db.create_all()
-    logging.info("Database tables created successfully")
