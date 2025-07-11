@@ -1,9 +1,13 @@
 from app import app, db
+
+# Import models BEFORE importing routes to prevent circular imports
+import models
+
+# Import routes after models are loaded
 import routes
 
-# Import models and create tables only once at startup
+# Create tables only once at startup
 with app.app_context():
-    import models
     db.create_all()
     print("Database tables created successfully")
 
