@@ -21,8 +21,6 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
 }
 
-db.init_app(app)
-
 # Create upload and reports directories
 upload_folder = 'uploads'
 reports_folder = 'reports'
@@ -33,7 +31,13 @@ app.config['UPLOAD_FOLDER'] = upload_folder
 app.config['REPORTS_FOLDER'] = reports_folder
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
+# Initialize database
+db.init_app(app)
+
+# Import models AFTER db initialization but BEFORE app context
+import models
+
+# Create tables in app context
 with app.app_context():
-    import models
     db.create_all()
     logging.info("Database tables created successfully")
