@@ -33,3 +33,10 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Initialize database
 db.init_app(app)
+
+with app.app_context():
+    # Import models and routes in centralized location to prevent double registration
+    import models  # noqa: F401
+    import routes  # noqa: F401
+    db.create_all()
+    print("Database tables created successfully")
