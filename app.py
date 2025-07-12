@@ -34,4 +34,16 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize database
 db.init_app(app)
 
-# No automatic initialization - will be done in main.py only
+# Prevent models from being imported during app.py import
+# This ensures main.py controls the initialization order
+import sys
+_models_imported = False
+
+def safe_import_models():
+    global _models_imported
+    if not _models_imported:
+        import models
+        import routes
+        _models_imported = True
+        return True
+    return False
