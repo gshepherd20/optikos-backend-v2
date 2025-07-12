@@ -1,6 +1,7 @@
-from app import app
+from app import app, initialize_app
 
-# Everything else handled in app.py to prevent double registration
+# Initialize the app for WSGI
+initialize_app()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
