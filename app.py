@@ -34,12 +34,4 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize database
 db.init_app(app)
 
-# Lazy initialization function to prevent circular imports
-def initialize_app():
-    with app.app_context():
-        import models  # noqa: F401
-        import routes  # noqa: F401
-        db.create_all()
-        print("Database tables created successfully")
-
-# Initialization will be called explicitly from main.py
+# No automatic initialization - will be done in main.py only
