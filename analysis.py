@@ -1,10 +1,23 @@
-import cv2
+# Fix NumPy compatibility BEFORE any other imports
 import numpy as np
 
-# ColorMath 3.0.0 still uses numpy.asscalar internally, which was removed in NumPy 2.0+
-# This adds it back as a proper alias to a.item() for compatibility
+# ColorMath 3.0.0 requires numpy.asscalar which was removed in NumPy 2.0+
+# Add it back before importing colormath to prevent import errors
 if not hasattr(np, 'asscalar'):
-    np.asscalar = lambda a: a.item() if hasattr(a, 'item') else a
+    def asscalar_compat(a):
+        """Compatibility function for numpy.asscalar removed in NumPy 2.0+"""
+        if hasattr(a, 'item'):
+            return a.item()
+        elif hasattr(a, '__float__'):
+            return float(a)
+        elif hasattr(a, '__int__'):
+            return int(a)
+        else:
+            return a
+    # Monkey patch numpy to add asscalar back
+    np.asscalar = asscalar_compat
+
+import cv2
 
 from colormath.color_objects import LabColor
 from colormath.color_diff import delta_e_cie2000
