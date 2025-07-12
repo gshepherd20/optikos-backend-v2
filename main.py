@@ -1,14 +1,19 @@
-from app import app, db
+from app import app, db, safe_import_models
 
-# Import models and routes separately to control order
-with app.app_context():
-    # Import models first (no routes dependency)
-    import models
-    # Import routes after models are registered
-    import routes
-    # Create tables after everything is imported
-    db.create_all()
-    print("Database tables created successfully")
+# WSGI-safe initialization - only run once per process
+def initialize_once():
+    if not hasattr(initialize_once, 'done'):
+        with app.app_context():
+            # Use controlled import to prevent double registration
+            if safe_import_models():
+                db.create_all()
+                print("Database tables created successfully")
+            else:
+                print("Models already imported, skipping initialization")
+        initialize_once.done = True
+
+# Initialize for both WSGI and direct execution
+initialize_once()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
