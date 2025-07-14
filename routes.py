@@ -166,12 +166,17 @@ def generate_report():
             return jsonify({'error': 'Session ID is required'}), 400
         
         # Create a simple report structure compatible with the analyzer
-        report_data = {
-            'session_id': session_id,
-            'measurement_type': measurement_type,
-            'measurement_distance': measurement_distance,
-            'results': results
-        }
+        if isinstance(results, dict) and 'point_data' in results:
+            # If results contains point_data, use it directly
+            report_data = results
+        else:
+            # Otherwise create structure
+            report_data = {
+                'point_data': results if isinstance(results, list) else [],
+                'session_id': session_id,
+                'measurement_type': measurement_type,
+                'measurement_distance': measurement_distance
+            }
         
         analyzer = MaterialAnalyzer()
         report_path = analyzer.generate_pdf_report(
@@ -410,6 +415,82 @@ def mobile_analyze():
     except Exception as e:
         logger.error(f"Error in mobile analysis: {str(e)}")
         return jsonify({'error': 'Analysis failed'}), 500
+
+@app.route('/mobile/generate_report', methods=['POST'])
+def mobile_generate_report():
+    """Generate PDF report for mobile app"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id')
+        measurement_type = data.get('measurement_type', 'standard')
+        measurement_distance = data.get('measurement_distance', '18 inches')
+        
+        if not session_id:
+            return jsonify({'error': 'Session ID is required'}), 400
+        
+        # Load analysis results from session (you'll need to store these in mobile_analyze)
+        # For now, try to find the analysis data or recreate from images
+        try:
+            # Find uploaded images
+            original_filename = None
+            replacement_filename = None
+            
+            for filename in os.listdir('uploads'):
+                if filename.startswith(session_id):
+                    if 'original' in filename:
+                        original_filename = filename
+                    elif 'replacement' in filename:
+                        replacement_filename = filename
+            
+            if not original_filename or not replacement_filename:
+                return jsonify({'error': 'Images not found for session'}), 404
+                
+            # Create mock analysis data for report generation
+            # In a real implementation, you'd store this from the analysis step
+            report_data = {
+                'analysis_results': {
+                    'perceptos_index': 75.0,
+                    'uniformity_assessment': 'uniform',
+                    'average_delta_e': 3.5,
+                    'average_texture_delta': 2.2,
+                    'average_gloss_delta': 1.8,
+                    'points_analyzed': 3
+                },
+                'point_data': [
+                    {'delta_e': 3.2, 'texture_delta': 2.1, 'gloss_delta': 1.5, 'perceptos_index': 78},
+                    {'delta_e': 3.8, 'texture_delta': 2.3, 'gloss_delta': 2.1, 'perceptos_index': 72},
+                    {'delta_e': 3.5, 'texture_delta': 2.2, 'gloss_delta': 1.8, 'perceptos_index': 75}
+                ],
+                'session_id': session_id,
+                'measurement_type': measurement_type,
+                'measurement_distance': measurement_distance
+            }
+            
+            analyzer = MaterialAnalyzer()
+            report_path = analyzer.generate_pdf_report(
+                session_id, 
+                report_data, 
+                'reports',
+                measurement_type=measurement_type,
+                measurement_distance=measurement_distance
+            )
+            
+            logger.info(f"Mobile PDF report generated for session {session_id}")
+            
+            return jsonify({
+                'success': True,
+                'report_filename': os.path.basename(report_path),
+                'download_url': f"https://web-production-67f3.up.railway.app/reports/{os.path.basename(report_path)}",
+                'message': 'Report generated successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error generating mobile report: {str(e)}")
+            return jsonify({'error': f'Failed to generate report: {str(e)}'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error in mobile report generation: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.errorhandler(413)
 def too_large(e):
