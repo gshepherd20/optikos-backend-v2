@@ -335,24 +335,32 @@ def find_corresponding_point():
 
 @app.route('/mobile/analyze', methods=['POST'])
 def mobile_analyze():
-    """Mobile app analysis endpoint with real scientific calculations"""
+    """Mobile app analysis endpoint with toggle for manual points or auto clustering"""
     try:
         data = request.get_json()
         
         session_id = data.get('session_id')
-        original_points = data.get('original_points', [])
-        replacement_points = data.get('replacement_points', [])
+        analysis_mode = data.get('analysis_mode', 'manual')  # 'manual' or 'cluster'
         measurement_type = data.get('measurement_type', 'standard')
         measurement_distance = data.get('measurement_distance', '18 inches')
         
         if not session_id:
             return jsonify({'error': 'Session ID is required'}), 400
             
-        if len(original_points) != len(replacement_points):
-            return jsonify({'error': 'Number of original and replacement points must match'}), 400
+        # Validate based on analysis mode
+        if analysis_mode == 'manual':
+            original_points = data.get('original_points', [])
+            replacement_points = data.get('replacement_points', [])
             
-        if len(original_points) == 0:
-            return jsonify({'error': 'At least one point pair is required'}), 400
+            if len(original_points) != len(replacement_points):
+                return jsonify({'error': 'Number of original and replacement points must match'}), 400
+                
+            if len(original_points) == 0:
+                return jsonify({'error': 'At least one point pair is required'}), 400
+        elif analysis_mode == 'cluster':
+            n_clusters = data.get('n_clusters', 4)
+            if n_clusters < 2 or n_clusters > 8:
+                return jsonify({'error': 'Number of clusters must be between 2 and 8'}), 400
         
         # Find uploaded images
         original_filename = None
@@ -371,55 +379,106 @@ def mobile_analyze():
         original_path = os.path.join('uploads', original_filename)
         replacement_path = os.path.join('uploads', replacement_filename)
         
-        # Perform real scientific analysis
+        # Perform analysis based on selected mode
         analyzer = MaterialAnalyzer()
-        results = analyzer.analyze_points(
-            original_path, replacement_path, 
-            original_points, replacement_points,
-            measurement_type, measurement_distance
-        )
         
-        # Calculate photo alignment analysis
-        original_img = analyzer.load_and_resize_image(original_path)
-        replacement_img = analyzer.load_and_resize_image(replacement_path)
-        alignment_analysis = analyzer.calculate_photo_alignment_score(
-            original_img, replacement_img, original_points, replacement_points
-        )
+        if analysis_mode == 'cluster':
+            # Auto cluster analysis
+            results = analyzer.analyze_clusters(
+                original_path, replacement_path,
+                n_clusters=n_clusters,
+                measurement_type=measurement_type,
+                measurement_distance=measurement_distance
+            )
+        else:
+            # Manual point analysis
+            results = analyzer.analyze_points(
+                original_path, replacement_path, 
+                original_points, replacement_points,
+                measurement_type, measurement_distance
+            )
         
-        # Extract point analysis from new structure
-        point_results = results.get('point_analysis', [])
-        lighting_validation = results.get('lighting_validation', {})
-        photo_alignment = results.get('photo_alignment', {})
+        # Extract results based on analysis mode
+        if analysis_mode == 'cluster':
+            # For cluster analysis, use the structured results
+            point_results = results.get('detailed_results', [])
+            lighting_validation = results.get('lighting_validation', {})
+            photo_alignment = {'score': 100}  # Clusters don't need alignment scoring
+            analysis_results = results.get('analysis_results', {})
+        else:
+            # For manual point analysis, calculate photo alignment
+            original_img = analyzer.load_and_resize_image(original_path)
+            replacement_img = analyzer.load_and_resize_image(replacement_path)
+            alignment_analysis = analyzer.calculate_photo_alignment_score(
+                original_img, replacement_img, original_points, replacement_points
+            )
+            
+            point_results = results.get('point_analysis', [])
+            lighting_validation = results.get('lighting_validation', {})
+            photo_alignment = results.get('photo_alignment', {})
         
-        # Calculate summary statistics
+        # Calculate summary statistics based on analysis mode
         if point_results:
-            avg_delta_e = sum(r['delta_e'] for r in point_results) / len(point_results)
-            avg_texture = sum(r['texture_delta'] for r in point_results) / len(point_results)
-            avg_gloss = sum(r['gloss_delta'] for r in point_results) / len(point_results)
-            avg_perceptos = sum(r['perceptos_index'] for r in point_results) / len(point_results)
-            
-            # Determine overall assessment
-            assessment = analyzer.calculate_human_perception_assessment(point_results)
-            
-            response_data = {
-                'session_id': session_id,
-                'analysis_results': {
-                    'perceptosIndex': round(avg_perceptos, 1),
-                    'colorDiff': round(avg_delta_e, 1),
-                    'photoAlignment': photo_alignment.get('score', 0),
-                    'textureDiff': round(avg_texture, 2),
-                    'glossDiff': round(avg_gloss, 2),
-                    'status': assessment.capitalize(),
-                    'numPoints': len(point_results)
-                },
-                'detailed_results': point_results,
-                'lighting_validation': lighting_validation,
-                'verified_report_eligible': lighting_validation.get('verified_report_eligible', False),
-                'measurement_config': {
-                    'type': measurement_type,
-                    'distance': measurement_distance
+            if analysis_mode == 'cluster':
+                # Use pre-calculated cluster results
+                avg_delta_e = analysis_results.get('average_delta_e', 0)
+                avg_texture = 0  # Texture delta not used in cluster mode
+                avg_gloss = 0   # Gloss delta not used in cluster mode
+                avg_perceptos = analysis_results.get('perceptos_index', 0)
+                assessment = analysis_results.get('uniformity_assessment', 'uniform')
+                
+                response_data = {
+                    'session_id': session_id,
+                    'analysis_mode': analysis_mode,
+                    'analysis_results': {
+                        'perceptosIndex': round(avg_perceptos, 1),
+                        'colorDiff': round(avg_delta_e, 1),
+                        'photoAlignment': 100,  # Clusters don't need alignment
+                        'textureDiff': 0,
+                        'glossDiff': 0,
+                        'status': assessment.capitalize(),
+                        'numClusters': analysis_results.get('points_analyzed', 4),
+                        'confidencePercentage': analysis_results.get('confidence_percentage', 80)
+                    },
+                    'detailed_results': point_results,
+                    'cluster_data': results.get('cluster_data', {}),
+                    'lighting_validation': lighting_validation,
+                    'verified_report_eligible': lighting_validation.get('verified_report_eligible', False),
+                    'measurement_config': {
+                        'type': measurement_type,
+                        'distance': measurement_distance
+                    }
                 }
-            }
+            else:
+                # Manual point analysis calculations
+                avg_delta_e = sum(r['delta_e'] for r in point_results) / len(point_results)
+                avg_texture = sum(r['texture_delta'] for r in point_results) / len(point_results)
+                avg_gloss = sum(r['gloss_delta'] for r in point_results) / len(point_results)
+                avg_perceptos = sum(r['perceptos_index'] for r in point_results) / len(point_results)
+                
+                # Determine overall assessment
+                assessment = analyzer.calculate_human_perception_assessment(point_results)
+                
+                response_data = {
+                    'session_id': session_id,
+                    'analysis_mode': analysis_mode,
+                    'analysis_results': {
+                        'perceptosIndex': round(avg_perceptos, 1),
+                        'colorDiff': round(avg_delta_e, 1),
+                        'photoAlignment': photo_alignment.get('score', 0),
+                        'textureDiff': round(avg_texture, 2),
+                        'glossDiff': round(avg_gloss, 2),
+                        'status': assessment.capitalize(),
+                        'numPoints': len(point_results)
+                    },
+                    'detailed_results': point_results,
+                    'lighting_validation': lighting_validation,
+                    'verified_report_eligible': lighting_validation.get('verified_report_eligible', False),
+                    'measurement_config': {
+                        'type': measurement_type,
+                        'distance': measurement_distance
+                    }
+                }
             
             logger.info(f"Mobile analysis completed for session {session_id} with {len(point_results)} points")
             logger.info(f"Lighting validation: {lighting_validation.get('overall_lighting_quality', 'unknown')}, Verified eligible: {lighting_validation.get('verified_report_eligible', False)}")
