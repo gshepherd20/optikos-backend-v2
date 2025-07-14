@@ -115,6 +115,13 @@ def analyze_points():
             measurement_distance=measurement_distance
         )
         
+        # Calculate photo alignment analysis
+        original_img = analyzer.load_and_resize_image(original_path)
+        replacement_img = analyzer.load_and_resize_image(replacement_path)
+        alignment_analysis = analyzer.calculate_photo_alignment_score(
+            original_img, replacement_img, original_points, replacement_points
+        )
+        
         # Calculate human perception assessment
         assessment = analyzer.calculate_human_perception_assessment(results)
         
@@ -124,17 +131,21 @@ def analyze_points():
         avg_perceptos = round(sum(r['perceptos_index'] for r in results) / total_points, 2) if results else 0
         
         logger.info(f"Analysis completed for session {session_id}")
+        logger.info(f"Photo Alignment Score: {alignment_analysis['score']:.1f} ({alignment_analysis['assessment']})")
         
         return jsonify({
             'results': results,
             'session_id': session_id,
             'measurement_type': measurement_type,
             'measurement_distance': measurement_distance,
+            'alignment_analysis': alignment_analysis,
             'summary': {
                 'total_points': total_points,
                 'uniform_points': uniform_points,
                 'average_perceptos': avg_perceptos,
-                'human_assessment': assessment
+                'human_assessment': assessment,
+                'photo_alignment_score': alignment_analysis['score'],
+                'photo_alignment_assessment': alignment_analysis['assessment']
             }
         })
         
@@ -227,6 +238,71 @@ def mobile_upload():
         logger.error(f"Error uploading mobile images: {str(e)}")
         return jsonify({'error': 'Failed to upload images'}), 500
 
+@app.route('/find_corresponding_point', methods=['POST'])
+def find_corresponding_point():
+    """Find corresponding point in second image based on click in first image"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id')
+        click_x = data.get('x')
+        click_y = data.get('y')
+        image_type = data.get('image_type', 'original')  # which image was clicked
+        
+        if not session_id or click_x is None or click_y is None:
+            return jsonify({'error': 'Session ID and coordinates are required'}), 400
+        
+        # Find the uploaded images
+        original_filename = None
+        replacement_filename = None
+        
+        for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+            if filename.startswith(f"{session_id}_original_"):
+                original_filename = filename
+            elif filename.startswith(f"{session_id}_replacement_"):
+                replacement_filename = filename
+        
+        if not original_filename or not replacement_filename:
+            return jsonify({'error': 'Images not found for this session'}), 404
+        
+        original_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        replacement_path = os.path.join(app.config['UPLOAD_FOLDER'], replacement_filename)
+        
+        # Load images
+        analyzer = MaterialAnalyzer()
+        original_img = analyzer.load_and_resize_image(original_path)
+        replacement_img = analyzer.load_and_resize_image(replacement_path)
+        
+        # Find corresponding point
+        if image_type == 'original':
+            # Click was on original image, find corresponding point in replacement
+            corresponding = analyzer.find_corresponding_point(
+                original_img, replacement_img, click_x, click_y
+            )
+        else:
+            # Click was on replacement image, find corresponding point in original
+            corresponding = analyzer.find_corresponding_point(
+                replacement_img, original_img, click_x, click_y
+            )
+        
+        if corresponding:
+            logger.info(f"Found corresponding point: ({corresponding['x']}, {corresponding['y']}) with confidence {corresponding['confidence']:.2f}")
+            return jsonify({
+                'success': True,
+                'corresponding_point': corresponding,
+                'clicked_image': image_type,
+                'target_image': 'replacement' if image_type == 'original' else 'original'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Could not find corresponding point',
+                'clicked_image': image_type
+            })
+            
+    except Exception as e:
+        logger.error(f"Error finding corresponding point: {str(e)}")
+        return jsonify({'error': 'Failed to find corresponding point'}), 500
+
 @app.route('/mobile/analyze', methods=['POST'])
 def mobile_analyze():
     """Mobile app analysis endpoint with real scientific calculations"""
@@ -273,34 +349,50 @@ def mobile_analyze():
             measurement_type, measurement_distance
         )
         
+        # Calculate photo alignment analysis
+        original_img = analyzer.load_and_resize_image(original_path)
+        replacement_img = analyzer.load_and_resize_image(replacement_path)
+        alignment_analysis = analyzer.calculate_photo_alignment_score(
+            original_img, replacement_img, original_points, replacement_points
+        )
+        
+        # Extract point analysis from new structure
+        point_results = results.get('point_analysis', [])
+        lighting_validation = results.get('lighting_validation', {})
+        photo_alignment = results.get('photo_alignment', {})
+        
         # Calculate summary statistics
-        if results:
-            avg_delta_e = sum(r['delta_e'] for r in results) / len(results)
-            avg_texture = sum(r['texture_delta'] for r in results) / len(results)
-            avg_gloss = sum(r['gloss_delta'] for r in results) / len(results)
-            avg_perceptos = sum(r['perceptos_index'] for r in results) / len(results)
+        if point_results:
+            avg_delta_e = sum(r['delta_e'] for r in point_results) / len(point_results)
+            avg_texture = sum(r['texture_delta'] for r in point_results) / len(point_results)
+            avg_gloss = sum(r['gloss_delta'] for r in point_results) / len(point_results)
+            avg_perceptos = sum(r['perceptos_index'] for r in point_results) / len(point_results)
             
             # Determine overall assessment
-            assessment = analyzer.calculate_human_perception_assessment(results)
+            assessment = analyzer.calculate_human_perception_assessment(point_results)
             
             response_data = {
                 'session_id': session_id,
                 'analysis_results': {
                     'perceptosIndex': round(avg_perceptos, 1),
                     'colorDiff': round(avg_delta_e, 1),
+                    'photoAlignment': photo_alignment.get('score', 0),
                     'textureDiff': round(avg_texture, 2),
                     'glossDiff': round(avg_gloss, 2),
                     'status': assessment.capitalize(),
-                    'numPoints': len(results)
+                    'numPoints': len(point_results)
                 },
-                'detailed_results': results,
+                'detailed_results': point_results,
+                'lighting_validation': lighting_validation,
+                'verified_report_eligible': lighting_validation.get('verified_report_eligible', False),
                 'measurement_config': {
                     'type': measurement_type,
                     'distance': measurement_distance
                 }
             }
             
-            logger.info(f"Mobile analysis completed for session {session_id} with {len(results)} points")
+            logger.info(f"Mobile analysis completed for session {session_id} with {len(point_results)} points")
+            logger.info(f"Lighting validation: {lighting_validation.get('overall_lighting_quality', 'unknown')}, Verified eligible: {lighting_validation.get('verified_report_eligible', False)}")
             return jsonify(response_data)
         else:
             return jsonify({'error': 'Analysis failed to produce results'}), 500
