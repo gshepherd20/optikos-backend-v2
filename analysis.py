@@ -742,7 +742,7 @@ class MaterialAnalyzer:
     
     def generate_pdf_report(self, session_id, results, reports_folder, 
                            measurement_type='standard', measurement_distance='18 inches'):
-        """Generate PDF report using ReportLab"""
+        """Generate PDF report using ReportLab - handles both old and new result formats"""
         try:
             from reportlab.lib.pagesizes import letter
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -805,6 +805,42 @@ class MaterialAnalyzer:
             story.append(Paragraph(measurement_info, measurement_style))
             story.append(Spacer(1, 0.2*inch))
             
+            # Handle both old format (list) and new format (dict with point_analysis)
+            if isinstance(results, dict) and 'point_analysis' in results:
+                # New format - extract point analysis data
+                point_results = results['point_analysis']
+                lighting_data = results.get('lighting_validation', {})
+                
+                # Add lighting validation section if available
+                if lighting_data:
+                    lighting_style = ParagraphStyle(
+                        'LightingInfo',
+                        parent=styles['Heading3'],
+                        fontSize=14,
+                        spaceAfter=10,
+                        textColor=colors.HexColor('#059669')
+                    )
+                    story.append(Paragraph("Scientific Lighting Validation", lighting_style))
+                    
+                    original_lighting = lighting_data.get('original_image', {})
+                    replacement_lighting = lighting_data.get('replacement_image', {})
+                    
+                    lighting_info = f"""
+                    <b>Original Image:</b> {original_lighting.get('illuminance_lux', 'N/A'):.0f} lux, 
+                    {original_lighting.get('color_temperature_k', 'N/A')}K, 
+                    {original_lighting.get('uniformity_percent', 'N/A'):.1f}% uniformity<br/>
+                    <b>Replacement Image:</b> {replacement_lighting.get('illuminance_lux', 'N/A'):.0f} lux, 
+                    {replacement_lighting.get('color_temperature_k', 'N/A')}K, 
+                    {replacement_lighting.get('uniformity_percent', 'N/A'):.1f}% uniformity<br/>
+                    <b>Lighting Quality:</b> {lighting_data.get('overall_lighting_quality', 'Unknown').title()}<br/>
+                    <b>Verified Report Eligible:</b> {'Yes' if lighting_data.get('verified_report_eligible', False) else 'No'}
+                    """
+                    story.append(Paragraph(lighting_info, styles['Normal']))
+                    story.append(Spacer(1, 0.2*inch))
+            else:
+                # Old format - results is a list
+                point_results = results
+            
             # Summary with enhanced styling
             summary_style = ParagraphStyle(
                 'SummaryHeader',
@@ -815,9 +851,9 @@ class MaterialAnalyzer:
             )
             story.append(Paragraph("Analysis Summary", summary_style))
             
-            total_points = len(results)
-            uniform_points = sum(1 for r in results if r['is_uniform'])
-            avg_perceptos = round(sum(r['perceptos_index'] for r in results) / total_points, 2)
+            total_points = len(point_results)
+            uniform_points = sum(1 for r in point_results if r['is_uniform'])
+            avg_perceptos = round(sum(r['perceptos_index'] for r in point_results) / total_points, 2)
             
             # Professional summary with clear color coding
             status_color = colors.HexColor('#10B981') if uniform_points == total_points else colors.HexColor('#F59E0B')
@@ -844,7 +880,7 @@ class MaterialAnalyzer:
             story.append(Paragraph("Detailed Point Analysis", results_style))
             
             # Calculate human perception assessment
-            assessment = self.calculate_human_perception_assessment(results)
+            assessment = self.calculate_human_perception_assessment(point_results)
             
             # Professional assessment display
             if assessment == "uniform":
@@ -883,7 +919,7 @@ class MaterialAnalyzer:
                 ['Point #', 'Color', 'ΔE', 'Texture', 'Gloss', 'Perceptos Index', 'Status']
             ]
             
-            for result in results:
+            for result in point_results:
                 # Enhanced status with color coding
                 if result['is_uniform']:
                     status = "Uniform"
