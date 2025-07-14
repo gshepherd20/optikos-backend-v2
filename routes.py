@@ -157,26 +157,41 @@ def analyze_points():
 def generate_report():
     try:
         data = request.get_json()
+        logger.info(f"=== REPORT GENERATION DEBUG ===")
+        logger.info(f"Raw request data: {json.dumps(data, indent=2)}")
+        
         session_id = data.get('session_id')
         results = data.get('results', {})
         measurement_type = data.get('measurement_type', 'standard')
         measurement_distance = data.get('measurement_distance', '18 inches')
         
+        logger.info(f"Session ID: {session_id}")
+        logger.info(f"Results type: {type(results)}")
+        logger.info(f"Results content: {results}")
+        logger.info(f"Results is list: {isinstance(results, list)}")
+        logger.info(f"Results is dict: {isinstance(results, dict)}")
+        
         if not session_id:
             return jsonify({'error': 'Session ID is required'}), 400
         
-        # Create a simple report structure compatible with the analyzer
-        if isinstance(results, dict) and 'point_data' in results:
-            # If results contains point_data, use it directly
+        # Handle mobile app format - results should be a list of point data
+        if isinstance(results, list):
+            # Mobile app sends results as array directly
             report_data = results
+            logger.info(f"Using results as direct array, length: {len(results)}")
+        elif isinstance(results, dict) and 'point_data' in results:
+            # Legacy format with point_data wrapper
+            report_data = results['point_data']
+            logger.info(f"Extracted point_data array, length: {len(report_data)}")
         else:
-            # Otherwise create structure
-            report_data = {
-                'point_data': results if isinstance(results, list) else [],
-                'session_id': session_id,
-                'measurement_type': measurement_type,
-                'measurement_distance': measurement_distance
-            }
+            # Fallback
+            report_data = []
+            logger.warning(f"No valid point data found, using empty array")
+        
+        logger.info(f"Final report_data: {report_data}")
+        
+        if len(report_data) == 0:
+            return jsonify({'error': 'No analysis points provided for report generation'}), 400
         
         analyzer = MaterialAnalyzer()
         report_path = analyzer.generate_pdf_report(
@@ -428,43 +443,26 @@ def mobile_generate_report():
         if not session_id:
             return jsonify({'error': 'Session ID is required'}), 400
         
-        # Load analysis results from session (you'll need to store these in mobile_analyze)
-        # For now, try to find the analysis data or recreate from images
+        # Get the actual analysis data passed from mobile app
+        analysis_data = data.get('analysis_data')
+        
+        if not analysis_data:
+            return jsonify({'error': 'Analysis data is required for report generation'}), 400
+        
         try:
-            # Find uploaded images
-            original_filename = None
-            replacement_filename = None
+            # Use the real analysis data from mobile app
+            # The data comes from the actual MaterialAnalyzer.analyze_points() call
+            report_data = analysis_data
             
-            for filename in os.listdir('uploads'):
-                if filename.startswith(session_id):
-                    if 'original' in filename:
-                        original_filename = filename
-                    elif 'replacement' in filename:
-                        replacement_filename = filename
+            # Debug logging for data structure verification
+            logger.info(f"Report data type: {type(report_data)}")
+            logger.info(f"Report data keys: {list(report_data.keys()) if isinstance(report_data, dict) else 'Not a dict'}")
             
-            if not original_filename or not replacement_filename:
-                return jsonify({'error': 'Images not found for session'}), 404
-                
-            # Create mock analysis data for report generation
-            # In a real implementation, you'd store this from the analysis step
-            report_data = {
-                'analysis_results': {
-                    'perceptos_index': 75.0,
-                    'uniformity_assessment': 'uniform',
-                    'average_delta_e': 3.5,
-                    'average_texture_delta': 2.2,
-                    'average_gloss_delta': 1.8,
-                    'points_analyzed': 3
-                },
-                'point_data': [
-                    {'delta_e': 3.2, 'texture_delta': 2.1, 'gloss_delta': 1.5, 'perceptos_index': 78},
-                    {'delta_e': 3.8, 'texture_delta': 2.3, 'gloss_delta': 2.1, 'perceptos_index': 72},
-                    {'delta_e': 3.5, 'texture_delta': 2.2, 'gloss_delta': 1.8, 'perceptos_index': 75}
-                ],
-                'session_id': session_id,
-                'measurement_type': measurement_type,
-                'measurement_distance': measurement_distance
-            }
+            if 'point_analysis' in report_data:
+                logger.info(f"Point analysis type: {type(report_data['point_analysis'])}")
+                logger.info(f"Point analysis length: {len(report_data['point_analysis']) if isinstance(report_data['point_analysis'], list) else 'Not a list'}")
+                if isinstance(report_data['point_analysis'], list) and len(report_data['point_analysis']) > 0:
+                    logger.info(f"First point keys: {list(report_data['point_analysis'][0].keys()) if isinstance(report_data['point_analysis'][0], dict) else 'First point not a dict'}")
             
             analyzer = MaterialAnalyzer()
             report_path = analyzer.generate_pdf_report(
