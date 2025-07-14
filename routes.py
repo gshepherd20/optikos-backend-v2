@@ -158,17 +158,25 @@ def generate_report():
     try:
         data = request.get_json()
         session_id = data.get('session_id')
-        results = data.get('results', [])
+        results = data.get('results', {})
         measurement_type = data.get('measurement_type', 'standard')
         measurement_distance = data.get('measurement_distance', '18 inches')
         
-        if not session_id or not results:
-            return jsonify({'error': 'Session ID and results are required'}), 400
+        if not session_id:
+            return jsonify({'error': 'Session ID is required'}), 400
+        
+        # Create a simple report structure compatible with the analyzer
+        report_data = {
+            'session_id': session_id,
+            'measurement_type': measurement_type,
+            'measurement_distance': measurement_distance,
+            'results': results
+        }
         
         analyzer = MaterialAnalyzer()
         report_path = analyzer.generate_pdf_report(
             session_id, 
-            results, 
+            report_data, 
             app.config['REPORTS_FOLDER'],
             measurement_type=measurement_type,
             measurement_distance=measurement_distance
@@ -177,13 +185,15 @@ def generate_report():
         logger.info(f"PDF report generated for session {session_id}")
         
         return jsonify({
+            'success': True,
+            'report_filename': os.path.basename(report_path),
             'report_url': url_for('download_report', filename=os.path.basename(report_path)),
             'message': 'Report generated successfully'
         })
         
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}")
-        return jsonify({'error': 'Failed to generate report'}), 500
+        return jsonify({'error': f'Failed to generate report: {str(e)}'}), 500
 
 @app.route('/reports/<filename>')
 def download_report(filename):
