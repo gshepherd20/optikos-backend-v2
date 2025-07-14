@@ -1,23 +1,10 @@
-# Fix NumPy compatibility BEFORE any other imports
+import cv2
 import numpy as np
 
-# ColorMath 3.0.0 requires numpy.asscalar which was removed in NumPy 2.0+
-# Add it back before importing colormath to prevent import errors
+# ColorMath 3.0.0 still uses numpy.asscalar internally, which was removed in NumPy 2.0+
+# This adds it back as a proper alias to a.item() for compatibility
 if not hasattr(np, 'asscalar'):
-    def asscalar_compat(a):
-        """Compatibility function for numpy.asscalar removed in NumPy 2.0+"""
-        if hasattr(a, 'item'):
-            return a.item()
-        elif hasattr(a, '__float__'):
-            return float(a)
-        elif hasattr(a, '__int__'):
-            return int(a)
-        else:
-            return a
-    # Monkey patch numpy to add asscalar back
-    np.asscalar = asscalar_compat
-
-import cv2
+    np.asscalar = lambda a: a.item() if hasattr(a, 'item') else a
 
 from colormath.color_objects import LabColor
 from colormath.color_diff import delta_e_cie2000
@@ -26,12 +13,14 @@ from scipy.ndimage import gaussian_laplace
 import os
 import logging
 from datetime import datetime
+from lighting_validator import ScientificLightingValidator
 
 logger = logging.getLogger(__name__)
 
 class MaterialAnalyzer:
     def __init__(self):
         self.colors = ["red", "green", "blue", "orange", "purple", "cyan", "yellow", "magenta", "lime", "pink"]
+        self.lighting_validator = ScientificLightingValidator()
     
     def load_and_resize_image(self, image_path, target_size=(400, 400)):
         """Load and resize image to exact same size for accurate point correspondence"""
@@ -176,6 +165,351 @@ class MaterialAnalyzer:
         
         return perceptos_index
     
+    def find_corresponding_point(self, original_img, replacement_img, click_x, click_y, search_radius=50):
+        """Find the corresponding point in the second image using computer vision"""
+        try:
+            # Convert to grayscale for feature detection
+            gray1 = cv2.cvtColor(original_img, cv2.COLOR_RGB2GRAY)
+            gray2 = cv2.cvtColor(replacement_img, cv2.COLOR_RGB2GRAY)
+            
+            # Create a local region around the clicked point for analysis
+            h1, w1 = gray1.shape
+            h2, w2 = gray2.shape
+            
+            # Ensure click point is within image bounds
+            click_x = max(search_radius, min(w1 - search_radius, click_x))
+            click_y = max(search_radius, min(h1 - search_radius, click_y))
+            
+            # Extract local patch around clicked point
+            patch_size = search_radius * 2
+            y1 = max(0, int(click_y - search_radius))
+            y2 = min(h1, int(click_y + search_radius))
+            x1 = max(0, int(click_x - search_radius))
+            x2 = min(w1, int(click_x + search_radius))
+            
+            template = gray1[y1:y2, x1:x2]
+            
+            if template.size == 0:
+                return None
+            
+            # Method 1: Template Matching with multiple scales
+            best_match = None
+            best_confidence = 0
+            
+            scales = [0.8, 0.9, 1.0, 1.1, 1.2]  # Account for scale differences
+            
+            for scale in scales:
+                # Resize template for scale invariance
+                if scale != 1.0:
+                    scaled_template = cv2.resize(template, 
+                                               (int(template.shape[1] * scale), 
+                                                int(template.shape[0] * scale)))
+                else:
+                    scaled_template = template
+                
+                if scaled_template.shape[0] >= gray2.shape[0] or scaled_template.shape[1] >= gray2.shape[1]:
+                    continue
+                
+                # Template matching
+                result = cv2.matchTemplate(gray2, scaled_template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                
+                if max_val > best_confidence:
+                    best_confidence = max_val
+                    # Adjust for template center and scale
+                    center_x = max_loc[0] + scaled_template.shape[1] // 2
+                    center_y = max_loc[1] + scaled_template.shape[0] // 2
+                    best_match = (center_x, center_y, max_val)
+            
+            # Method 2: Feature-based matching for validation
+            if best_match and best_confidence > 0.6:
+                # Use ORB features for additional validation
+                orb = cv2.ORB_create(nfeatures=100)
+                
+                # Find features in the template region
+                kp1, des1 = orb.detectAndCompute(template, None)
+                
+                if des1 is not None and len(kp1) > 5:
+                    # Search in region around template match
+                    match_x, match_y, _ = best_match
+                    search_x1 = max(0, match_x - search_radius)
+                    search_y1 = max(0, match_y - search_radius)
+                    search_x2 = min(w2, match_x + search_radius)
+                    search_y2 = min(h2, match_y + search_radius)
+                    
+                    search_region = gray2[search_y1:search_y2, search_x1:search_x2]
+                    
+                    if search_region.size > 0:
+                        kp2, des2 = orb.detectAndCompute(search_region, None)
+                        
+                        if des2 is not None and len(kp2) > 3:
+                            # Match features
+                            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+                            matches = bf.match(des1, des2)
+                            
+                            if len(matches) >= 3:
+                                # Calculate centroid of matched features
+                                matched_points = []
+                                for match in matches[:10]:  # Top 10 matches
+                                    pt = kp2[match.trainIdx].pt
+                                    # Convert back to full image coordinates
+                                    full_x = pt[0] + search_x1
+                                    full_y = pt[1] + search_y1
+                                    matched_points.append((full_x, full_y))
+                                
+                                if matched_points:
+                                    # Use centroid of matched features
+                                    avg_x = sum(p[0] for p in matched_points) / len(matched_points)
+                                    avg_y = sum(p[1] for p in matched_points) / len(matched_points)
+                                    
+                                    # Refine the match using feature centroid
+                                    refined_match = (avg_x, avg_y, best_confidence + 0.1)
+                                    return {
+                                        'x': int(refined_match[0]),
+                                        'y': int(refined_match[1]),
+                                        'confidence': min(1.0, refined_match[2]),
+                                        'method': 'feature_refined'
+                                    }
+            
+            # Return template matching result if confidence is good enough
+            if best_match and best_confidence > 0.5:
+                return {
+                    'x': int(best_match[0]),
+                    'y': int(best_match[1]),
+                    'confidence': best_confidence,
+                    'method': 'template_matching'
+                }
+            
+            # Method 3: Fallback using global homography
+            return self._find_point_using_homography(original_img, replacement_img, click_x, click_y)
+            
+        except Exception as e:
+            logger.error(f"Error finding corresponding point: {str(e)}")
+            return None
+    
+    def _find_point_using_homography(self, original_img, replacement_img, click_x, click_y):
+        """Fallback method using global image homography"""
+        try:
+            gray1 = cv2.cvtColor(original_img, cv2.COLOR_RGB2GRAY)
+            gray2 = cv2.cvtColor(replacement_img, cv2.COLOR_RGB2GRAY)
+            
+            # Detect features globally
+            orb = cv2.ORB_create(nfeatures=1000)
+            kp1, des1 = orb.detectAndCompute(gray1, None)
+            kp2, des2 = orb.detectAndCompute(gray2, None)
+            
+            if des1 is None or des2 is None:
+                return None
+            
+            # Match features
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+            matches = bf.match(des1, des2)
+            matches = sorted(matches, key=lambda x: x.distance)
+            
+            if len(matches) < 10:
+                return None
+            
+            # Extract good matches
+            good_matches = matches[:50]  # Top 50 matches
+            src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            
+            # Find homography
+            H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            
+            if H is not None:
+                # Transform the clicked point
+                point = np.array([[[click_x, click_y]]], dtype=np.float32)
+                transformed = cv2.perspectiveTransform(point, H)
+                
+                if transformed is not None and len(transformed) > 0:
+                    x, y = transformed[0][0]
+                    
+                    # Validate the transformed point is within image bounds
+                    h, w = replacement_img.shape[:2]
+                    if 0 <= x < w and 0 <= y < h:
+                        return {
+                            'x': int(x),
+                            'y': int(y),
+                            'confidence': 0.7,
+                            'method': 'homography'
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in homography point finding: {str(e)}")
+            return None
+    
+    def calculate_photo_alignment_score(self, original_img, replacement_img, original_points, replacement_points):
+        """Calculate photo alignment using computer vision feature detection (independent of user points)"""
+        try:
+            # Convert to grayscale for feature detection
+            gray1 = cv2.cvtColor(original_img, cv2.COLOR_RGB2GRAY)
+            gray2 = cv2.cvtColor(replacement_img, cv2.COLOR_RGB2GRAY)
+            
+            # 1. Feature Detection using ORB (Oriented FAST and Rotated BRIEF)
+            orb = cv2.ORB_create(nfeatures=500)
+            kp1, des1 = orb.detectAndCompute(gray1, None)
+            kp2, des2 = orb.detectAndCompute(gray2, None)
+            
+            if des1 is None or des2 is None or len(kp1) < 10 or len(kp2) < 10:
+                return {
+                    'score': 0,
+                    'assessment': 'insufficient_features',
+                    'features_detected': f"{len(kp1) if kp1 else 0}/{len(kp2) if kp2 else 0}",
+                    'match_quality': 0,
+                    'geometric_consistency': 0,
+                    'scale_consistency': 0
+                }
+            
+            # 2. Feature Matching using FLANN matcher
+            FLANN_INDEX_LSH = 6
+            index_params = dict(algorithm=FLANN_INDEX_LSH,
+                              table_number=6,
+                              key_size=12,
+                              multi_probe_level=1)
+            search_params = dict(checks=50)
+            flann = cv2.FlannBasedMatcher(index_params, search_params)
+            
+            try:
+                matches = flann.knnMatch(des1, des2, k=2)
+            except:
+                # Fallback to brute force matcher
+                bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+                matches = bf.match(des1, des2)
+                matches = [[m] for m in matches[:100]]  # Convert to knn format
+            
+            # 3. Filter good matches using Lowe's ratio test
+            good_matches = []
+            for match_pair in matches:
+                if len(match_pair) == 2:
+                    m, n = match_pair
+                    if m.distance < 0.7 * n.distance:  # Lowe's ratio test
+                        good_matches.append(m)
+                elif len(match_pair) == 1:
+                    good_matches.append(match_pair[0])
+            
+            if len(good_matches) < 10:
+                return {
+                    'score': 20,
+                    'assessment': 'poor_matching',
+                    'features_detected': f"{len(kp1)}/{len(kp2)}",
+                    'good_matches': len(good_matches),
+                    'match_quality': 0,
+                    'geometric_consistency': 0
+                }
+            
+            # 4. Extract matched keypoint coordinates
+            src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            
+            # 5. Calculate homography and geometric consistency
+            try:
+                H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                inliers = np.sum(mask)
+                geometric_consistency = (inliers / len(good_matches)) * 100
+            except:
+                geometric_consistency = 0
+                H = None
+            
+            # 6. Scale and rotation analysis
+            scale_consistency = 0
+            rotation_consistency = 0
+            
+            if H is not None and len(good_matches) >= 20:
+                try:
+                    # Decompose homography to get scale and rotation
+                    # Extract scale from homography matrix
+                    scale_x = np.sqrt(H[0,0]**2 + H[1,0]**2)
+                    scale_y = np.sqrt(H[0,1]**2 + H[1,1]**2)
+                    scale_ratio = min(scale_x, scale_y) / max(scale_x, scale_y)
+                    scale_consistency = scale_ratio * 100
+                    
+                    # Calculate rotation angle
+                    rotation = np.arctan2(H[1,0], H[0,0]) * 180 / np.pi
+                    rotation_consistency = max(0, 100 - abs(rotation) * 2)  # Penalize rotation
+                except:
+                    scale_consistency = 0
+                    rotation_consistency = 0
+            
+            # 7. Material-specific feature analysis
+            # Check if features are distributed across the image (not clustered)
+            if len(good_matches) >= 10:
+                matched_points = np.array([kp1[m.queryIdx].pt for m in good_matches])
+                
+                # Calculate feature distribution score
+                center = np.mean(matched_points, axis=0)
+                distances = np.linalg.norm(matched_points - center, axis=1)
+                distribution_score = min(100, np.std(distances) * 2)  # Higher std = better distribution
+            else:
+                distribution_score = 0
+            
+            # 8. Match quality assessment
+            if len(good_matches) > 0:
+                avg_distance = np.mean([m.distance for m in good_matches])
+                match_quality = max(0, 100 - avg_distance * 2)  # Lower distance = better quality
+            else:
+                match_quality = 0
+            
+            # 9. Overall alignment score calculation
+            weights = {
+                'geometric': 0.35,    # Most important - geometric consistency
+                'matches': 0.25,      # Number and quality of matches
+                'scale': 0.20,        # Scale consistency
+                'distribution': 0.15, # Feature distribution
+                'rotation': 0.05      # Rotation consistency
+            }
+            
+            match_score = min(100, (len(good_matches) / 50) * 100)  # Normalize to 50 good matches = 100%
+            
+            alignment_score = (
+                geometric_consistency * weights['geometric'] +
+                match_score * weights['matches'] +
+                scale_consistency * weights['scale'] +
+                distribution_score * weights['distribution'] +
+                rotation_consistency * weights['rotation']
+            )
+            
+            # 10. Assessment categories
+            if alignment_score >= 85:
+                assessment = 'excellent'
+            elif alignment_score >= 70:
+                assessment = 'good'
+            elif alignment_score >= 55:
+                assessment = 'fair'
+            elif alignment_score >= 35:
+                assessment = 'poor'
+            else:
+                assessment = 'very_poor'
+            
+            logger.info(f"Feature detection: {len(kp1)}/{len(kp2)} keypoints, {len(good_matches)} good matches")
+            logger.info(f"Geometric consistency: {geometric_consistency:.1f}%, Match quality: {match_quality:.1f}")
+            
+            return {
+                'score': round(alignment_score, 1),
+                'assessment': assessment,
+                'features_detected': f"{len(kp1)}/{len(kp2)}",
+                'good_matches': len(good_matches),
+                'geometric_consistency': round(geometric_consistency, 1),
+                'match_quality': round(match_quality, 1),
+                'scale_consistency': round(scale_consistency, 1),
+                'feature_distribution': round(distribution_score, 1),
+                'analysis_method': 'computer_vision_features'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in computer vision alignment analysis: {str(e)}")
+            return {
+                'score': 0,
+                'assessment': 'analysis_error',
+                'features_detected': '0/0',
+                'good_matches': 0,
+                'geometric_consistency': 0,
+                'match_quality': 0,
+                'error': str(e)
+            }
+
     def calculate_human_perception_assessment(self, results):
         """Calculate overall uniformity based on human perception logic and Perceptos Index"""
         if not results:
@@ -226,8 +560,13 @@ class MaterialAnalyzer:
     
     def analyze_points(self, original_path, replacement_path, original_points, replacement_points, 
                       measurement_type='standard', measurement_distance='18 inches'):
-        """Analyze corresponding points between two images"""
+        """Analyze corresponding points between two images with scientific lighting validation"""
         try:
+            # Validate lighting conditions scientifically
+            logger.info("Performing scientific lighting validation...")
+            original_lighting = self.lighting_validator.analyze_image_lighting(original_path)
+            replacement_lighting = self.lighting_validator.analyze_image_lighting(replacement_path)
+            
             # Load images
             original_img = self.load_and_resize_image(original_path)
             replacement_img = self.load_and_resize_image(replacement_path)
@@ -306,12 +645,100 @@ class MaterialAnalyzer:
                 
                 results.append(result)
             
+            # Calculate alignment score using computer vision
+            alignment_score = self.calculate_photo_alignment_score(
+                original_img, replacement_img, original_points, replacement_points
+            )
+            
+            # Add lighting validation to results
+            analysis_results = {
+                'point_analysis': results,
+                'lighting_validation': {
+                    'original_image': {
+                        'illuminance_lux': original_lighting.illuminance_estimate,
+                        'color_temperature_k': original_lighting.color_temperature_estimate,
+                        'uniformity_percent': original_lighting.uniformity_score,
+                        'cri_estimate': original_lighting.cri_estimate,
+                        'scientific_validity': original_lighting.scientific_validity,
+                        'compliance_level': original_lighting.compliance_level,
+                        'recommendations': original_lighting.recommendations
+                    },
+                    'replacement_image': {
+                        'illuminance_lux': replacement_lighting.illuminance_estimate,
+                        'color_temperature_k': replacement_lighting.color_temperature_estimate,
+                        'uniformity_percent': replacement_lighting.uniformity_score,
+                        'cri_estimate': replacement_lighting.cri_estimate,
+                        'scientific_validity': replacement_lighting.scientific_validity,
+                        'compliance_level': replacement_lighting.compliance_level,
+                        'recommendations': replacement_lighting.recommendations
+                    },
+                    'overall_lighting_quality': self._assess_overall_lighting_quality(original_lighting, replacement_lighting),
+                    'verified_report_eligible': self._check_verified_report_eligibility(original_lighting, replacement_lighting)
+                },
+                'photo_alignment': alignment_score,
+                'measurement_metadata': {
+                    'type': measurement_type,
+                    'distance': measurement_distance,
+                    'analysis_timestamp': datetime.now().isoformat()
+                }
+            }
+            
             logger.info(f"Analysis completed for {len(results)} point pairs using {measurement_type} at {measurement_distance}")
-            return results
+            logger.info(f"Lighting validation: Original={original_lighting.scientific_validity}, Replacement={replacement_lighting.scientific_validity}")
+            logger.info(f"Verified report eligible: {analysis_results['lighting_validation']['verified_report_eligible']}")
+            
+            return analysis_results
             
         except Exception as e:
             logger.error(f"Error analyzing points: {str(e)}")
             raise
+    
+    def _assess_overall_lighting_quality(self, original_lighting, replacement_lighting):
+        """Assess overall lighting quality for both images"""
+        scores = [
+            original_lighting.uniformity_score,
+            replacement_lighting.uniformity_score,
+            original_lighting.cri_estimate,
+            replacement_lighting.cri_estimate
+        ]
+        
+        # Weight illuminance consistency between images
+        illuminance_diff = abs(original_lighting.illuminance_estimate - replacement_lighting.illuminance_estimate)
+        consistency_penalty = min(20, illuminance_diff / 50)  # Penalty for large differences
+        
+        avg_score = np.mean(scores) - consistency_penalty
+        
+        if avg_score >= 85:
+            return "excellent"
+        elif avg_score >= 75:
+            return "good"
+        elif avg_score >= 60:
+            return "acceptable"
+        else:
+            return "poor"
+    
+    def _check_verified_report_eligibility(self, original_lighting, replacement_lighting):
+        """Check if lighting conditions meet verified report standards"""
+        # Both images must meet minimum standards
+        original_meets = (
+            original_lighting.compliance_level in ["CIE_compliant", "acceptable"] and
+            original_lighting.uniformity_score >= 70 and
+            original_lighting.cri_estimate >= 80
+        )
+        
+        replacement_meets = (
+            replacement_lighting.compliance_level in ["CIE_compliant", "acceptable"] and
+            replacement_lighting.uniformity_score >= 70 and
+            replacement_lighting.cri_estimate >= 80
+        )
+        
+        # Lighting should be reasonably consistent between images
+        illuminance_diff = abs(original_lighting.illuminance_estimate - replacement_lighting.illuminance_estimate)
+        color_temp_diff = abs(original_lighting.color_temperature_estimate - replacement_lighting.color_temperature_estimate)
+        
+        consistency_ok = illuminance_diff < 300 and color_temp_diff < 1000  # Reasonable tolerances
+        
+        return original_meets and replacement_meets and consistency_ok
     
     def generate_pdf_report(self, session_id, results, reports_folder, 
                            measurement_type='standard', measurement_distance='18 inches'):
