@@ -18,9 +18,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Copy and make startup script executable
-COPY start.sh .
-RUN chmod +x start.sh
-
-# Use startup script
-CMD ["./start.sh"]
+# Use direct shell command for PORT expansion
+CMD ["bash", "-c", "echo 'Starting Flask app on port:' $PORT && exec gunicorn --bind 0.0.0.0:$PORT --log-level debug --access-logfile - --error-logfile - app:app"]
