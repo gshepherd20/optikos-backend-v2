@@ -1,5 +1,5 @@
 [variables]
-FORCE_REBUILD = '2025-07-15-complete'
+FORCE_REBUILD = '2025-07-15-backend-complete'
 
 [phases.setup]
 nixPkgs = [
@@ -9,7 +9,7 @@ aptPkgs = ['libgl1', 'libglib2.0-0']
 
 [phases.build]
 dependsOn = ['setup']
-cmds = ['echo "Python environment ready with packages"']
+cmds = ['echo "Complete backend Python environment ready with safe imports"']
 
 [start]
 cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app'
