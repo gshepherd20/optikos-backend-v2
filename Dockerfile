@@ -18,5 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Start command with proper shell expansion
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:$PORT app:app"]
+# Copy and make startup script executable
+COPY start.sh .
+RUN chmod +x start.sh
+
+# Use startup script
+CMD ["./start.sh"]
