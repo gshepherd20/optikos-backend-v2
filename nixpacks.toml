@@ -3,7 +3,7 @@ FORCE_REBUILD = '2025-07-15-nixpython'
 
 [phases.setup]
 nixPkgs = [
-  '(python311.withPackages (ps: with ps; [pip setuptools wheel flask flask-cors gunicorn pillow numpy flask-sqlalchemy psycopg2 flask-login werkzeug requests]))'
+   '(python311Full.withPackages (ps: with ps; [pip setuptools wheel flask flask-cors gunicorn pillow numpy flask-sqlalchemy psycopg2 flask-login werkzeug requests]))'
 ]
 aptPkgs = ['libgl1', 'libglib2.0-0']
 
