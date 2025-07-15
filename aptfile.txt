@@ -1,11 +1,13 @@
-libgl1-mesa-dri
-libgl1-mesa-dev
-libglib2.0-0
-libxrender1
-libxext6
-libsm6
-libxrandr2
-libfontconfig1
-libxss1
-libegl1-mesa
-libgles2-mesa
+[variables]
+NIXPACKS_NO_CACHE = '1'
+[phases.setup]
+nixPkgs = ['python311', 'python311Packages.pip']
+aptPkgs = ['libgl1', 'libglx-mesa0', 'libegl1-mesa', 'libgbm1', 'libglib2.0-0', 'libxrender1', 'libxext6', 'libsm6', 'libxrandr2', 'libfontconfig1', 'libxss1']
+[phases.install]
+dependsOn = ['setup']
+cmds = ['python -m pip install --upgrade pip setuptools wheel']
+[phases.build]
+dependsOn = ['install']
+cmds = ['pip install -r requirements.txt']
+[start]
+cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app'
