@@ -1,19 +1,15 @@
 [variables]
-FORCE_REBUILD = '2025-07-15-streamlined'
+FORCE_REBUILD = '2025-07-15-nixonly'
 
 [phases.setup]
-nixPkgs = ['python311Full']
+nixPkgs = [
+  '(python311Full.withPackages (ps: with ps; [flask flask-cors gunicorn flask-sqlalchemy psycopg2 flask-login werkzeug]))'
+]
 aptPkgs = ['libgl1', 'libglib2.0-0']
 
-[phases.install]
+[phases.build]
 dependsOn = ['setup']
-cmds = [
-  'pip install --no-cache-dir --disable-pip-version-check Flask==3.1.1',
-  'pip install --no-cache-dir --disable-pip-version-check flask-cors==6.0.1',
-  'pip install --no-cache-dir --disable-pip-version-check gunicorn==23.0.0',
-  'pip install --no-cache-dir --disable-pip-version-check flask-sqlalchemy==3.1.1',
-  'pip install --no-cache-dir --disable-pip-version-check psycopg2-binary==2.9.10'
-]
+cmds = ['echo "Python environment ready"']
 
 [start]
 cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app'
