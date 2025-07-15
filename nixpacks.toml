@@ -1,8 +1,17 @@
+[variables]
+NIXPACKS_NO_CACHE = '1'
+
 [phases.setup]
-nixPkgs = ['libGL', 'libGLU', 'glib', 'libxcrypt-legacy', 'mesa', 'xorg.libX11', 'xorg.libXext', 'xorg.libXrender']
+nixPkgs = ['python311', 'python311Packages.pip']
+aptPkgs = ['libgl1-mesa-glx', 'libglib2.0-0', 'libxrender1', 'libxext6', 'libsm6', 'libxrandr2', 'libfontconfig1', 'libxss1']
 
 [phases.install]
-cmds = ['pip install --upgrade pip']
+dependsOn = ['setup']
+cmds = ['python -m pip install --upgrade pip setuptools wheel']
+
+[phases.build]
+dependsOn = ['install']
+cmds = ['pip install -r requirements.txt']
 
 [start]
-cmd = 'gunicorn --bind 0.0.0.0:$PORT main:app'
+cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 main:app'
