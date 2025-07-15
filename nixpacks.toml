@@ -1,15 +1,17 @@
 [variables]
-FORCE_REBUILD = '2025-07-15-backend-complete'
+FORCE_REBUILD = '2025-07-15-nixpkgs-fixed'
 
 [phases.setup]
 nixPkgs = [
-  '(python311Full.withPackages (ps: with ps; [pip setuptools wheel flask flask-cors gunicorn pillow numpy flask-sqlalchemy psycopg2 flask-login werkzeug email-validator pyjwt requests flask-dance oauthlib sqlalchemy]))'
+  '(python311Full.withPackages (ps: with ps; [pip setuptools wheel flask flask-cors gunicorn pillow numpy flask-sqlalchemy psycopg2 flask-login werkzeug requests]))'
 ]
 aptPkgs = ['libgl1', 'libglib2.0-0']
 
 [phases.build]
 dependsOn = ['setup']
-cmds = ['echo "Complete backend Python environment ready with safe imports"']
+cmds = [
+  'pip install --no-cache-dir email-validator==2.2.0 pyjwt==2.10.1 flask-dance==7.1.0 oauthlib==3.3.1 sqlalchemy==2.0.41'
+]
 
 [start]
 cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app'
