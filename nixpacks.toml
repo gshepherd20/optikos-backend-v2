@@ -1,16 +1,18 @@
 [variables]
-FORCE_REBUILD = '2025-07-15-nixpkgs-fixed'
+FORCE_REBUILD = '2025-07-15-streamlined'
 
 [phases.setup]
-nixPkgs = [
-  '(python311Full.withPackages (ps: with ps; [pip setuptools wheel flask flask-cors gunicorn pillow numpy flask-sqlalchemy psycopg2 flask-login werkzeug requests]))'
-]
+nixPkgs = ['python311Full']
 aptPkgs = ['libgl1', 'libglib2.0-0']
 
-[phases.build]
+[phases.install]
 dependsOn = ['setup']
 cmds = [
-  'pip install --no-cache-dir email-validator==2.2.0 pyjwt==2.10.1 flask-dance==7.1.0 oauthlib==3.3.1 sqlalchemy==2.0.41'
+  'pip install --no-cache-dir --disable-pip-version-check Flask==3.1.1',
+  'pip install --no-cache-dir --disable-pip-version-check flask-cors==6.0.1',
+  'pip install --no-cache-dir --disable-pip-version-check gunicorn==23.0.0',
+  'pip install --no-cache-dir --disable-pip-version-check flask-sqlalchemy==3.1.1',
+  'pip install --no-cache-dir --disable-pip-version-check psycopg2-binary==2.9.10'
 ]
 
 [start]
