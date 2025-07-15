@@ -3,10 +3,14 @@
     "builder": "nixpacks"
   },
   "deploy": {
-    "startCommand": "gunicorn --bind 0.0.0.0:$PORT main:app",
+    "startCommand": "gunicorn --bind 0.0.0.0:$PORT app:app",
     "healthcheckPath": "/",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
+  },
+  "variables": {
+    "NIXPACKS_NO_CACHE": "1",
+    "FORCE_REBUILD": "2025-07-15"
   }
 }
