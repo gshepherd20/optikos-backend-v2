@@ -1,17 +1,15 @@
 [variables]
-FORCE_REBUILD = '2025-07-15-pip-fix'
+FORCE_REBUILD = '2025-07-15-nixpython'
 
 [phases.setup]
-nixPkgs = ['python311', 'python311Packages.pip', 'python311Packages.setuptools', 'python311Packages.wheel']
+nixPkgs = [
+  '(python311.withPackages (ps: with ps; [pip setuptools wheel flask flask-cors gunicorn pillow numpy flask-sqlalchemy psycopg2 flask-login werkzeug requests]))'
+]
 aptPkgs = ['libgl1', 'libglib2.0-0']
 
-[phases.install]
-dependsOn = ['setup']
-cmds = ['pip install --upgrade pip setuptools wheel']
-
 [phases.build]
-dependsOn = ['install']
-cmds = ['pip install -r requirements_deploy.txt']
+dependsOn = ['setup']
+cmds = ['echo "Python environment ready with packages"']
 
 [start]
 cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app'
