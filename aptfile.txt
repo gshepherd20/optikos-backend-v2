@@ -1,4 +1,5 @@
-libgl1-mesa-glx
+libgl1-mesa-dri
+libgl1-mesa-dev
 libglib2.0-0
 libxrender1
 libxext6
@@ -6,3 +7,5 @@ libsm6
 libxrandr2
 libfontconfig1
 libxss1
+libegl1-mesa
+libgles2-mesa
