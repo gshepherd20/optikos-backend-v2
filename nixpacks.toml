@@ -1,9 +1,10 @@
 [variables]
 NIXPACKS_NO_CACHE = '1'
+FORCE_REBUILD = '2025-07-15'
 
 [phases.setup]
 nixPkgs = ['python311', 'python311Packages.pip']
-aptPkgs = ['libgl1-mesa-glx', 'libglib2.0-0', 'libxrender1', 'libxext6', 'libsm6', 'libxrandr2', 'libfontconfig1', 'libxss1']
+aptPkgs = ['libgl1', 'libglx-mesa0', 'libegl1-mesa', 'libgbm1', 'libglib2.0-0', 'libxrender1', 'libxext6', 'libsm6', 'libxrandr2', 'libfontconfig1', 'libxss1']
 
 [phases.install]
 dependsOn = ['setup']
@@ -14,4 +15,4 @@ dependsOn = ['install']
 cmds = ['pip install -r requirements.txt']
 
 [start]
-cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 main:app'
+cmd = 'gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app'
