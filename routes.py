@@ -23,6 +23,11 @@ def allowed_file(filename):
 def index():
     return render_template('index.html')
 
+@app.route('/health')
+def health():
+    """Health check endpoint for Railway"""
+    return jsonify({'status': 'healthy', 'message': 'Optikos backend is running'})
+
 @app.route('/upload', methods=['POST'])
 def upload_images():
     try:
@@ -245,7 +250,10 @@ def mobile_upload():
             
             image_data = base64.b64decode(b64_data)
             filename = f"{session_id}_{prefix}.jpg"
-            filepath = os.path.join('uploads', filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            
+            # Ensure upload directory exists
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             
             with open(filepath, 'wb') as f:
                 f.write(image_data)
