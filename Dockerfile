@@ -18,5 +18,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Start command - Railway provides PORT at runtime
-CMD exec gunicorn --bind 0.0.0.0:$PORT app:app
+# Start command with proper shell expansion
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:$PORT app:app"]
