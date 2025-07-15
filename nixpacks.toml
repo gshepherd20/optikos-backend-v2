@@ -1,13 +1,13 @@
 [variables]
-FORCE_REBUILD = '2025-07-15-simplified'
+FORCE_REBUILD = '2025-07-15-pip-fix'
 
 [phases.setup]
-nixPkgs = ['python311', 'python311Packages.pip']
+nixPkgs = ['python311', 'python311Packages.pip', 'python311Packages.setuptools', 'python311Packages.wheel']
 aptPkgs = ['libgl1', 'libglib2.0-0']
 
 [phases.install]
 dependsOn = ['setup']
-cmds = ['python -m pip install --upgrade pip setuptools wheel']
+cmds = ['pip install --upgrade pip setuptools wheel']
 
 [phases.build]
 dependsOn = ['install']
